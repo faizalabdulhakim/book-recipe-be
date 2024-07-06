@@ -1,16 +1,22 @@
 package com.faizal.book.recipe.service;
 
+import com.faizal.book.recipe.dto.request.SigninRequestDTO;
 import com.faizal.book.recipe.dto.request.SignupRequestDTO;
+import com.faizal.book.recipe.dto.response.SigninResponseDTO;
 import com.faizal.book.recipe.dto.response.SignupResponseDTO;
 import com.faizal.book.recipe.exception.ApiRequestException;
 import com.faizal.book.recipe.model.User;
 import com.faizal.book.recipe.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 @Service
 public class UserService {
@@ -21,13 +27,26 @@ public class UserService {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    private final AuthenticationManager authenticationManager;
+
+    public UserService(
+            UserRepository userRepository,
+            AuthenticationManager authenticationManager,
+            PasswordEncoder passwordEncoder
+    ) {
+        this.authenticationManager = authenticationManager;
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+    }
+
+
     public SignupResponseDTO registerNewUser(SignupRequestDTO signupRequestDTO) {
         String username = signupRequestDTO.getUsername();
         String fullname = signupRequestDTO.getFullname();
         String password = signupRequestDTO.getPassword();
         String role = signupRequestDTO.getRole();
 
-        if (userRepository.findByUsername(username) != null) {
+        if (userRepository.findByUsername(username).isPresent()) {
             throw new ApiRequestException("Username telah digunakan oleh user yang telah mendaftar sebelumnya");
         }
 
@@ -51,18 +70,18 @@ public class UserService {
             throw new ApiRequestException("Konfirmasi password tidak sesuai");
         }
 
-        User user = new User();
-        user.setUsername(username);
-        user.setFullname(fullname);
-        user.setPassword(passwordEncoder.encode(password));
-        user.setRole(role);
-        user.setCreatedTime(LocalDateTime.now());
-        user.setModifiedTime(LocalDateTime.now());
-        user.setCreatedBy("System");
-        user.setModifiedBy("System");
-        user.setIsDeleted(false);
-
         try {
+            User user = new User();
+            user.setUsername(username);
+            user.setFullname(fullname);
+            user.setPassword(passwordEncoder.encode(password));
+            user.setRole(role);
+            user.setCreatedTime(LocalDateTime.now());
+            user.setModifiedTime(LocalDateTime.now());
+            user.setCreatedBy("System");
+            user.setModifiedBy("System");
+            user.setIsDeleted(false);
+
             User savedUser = userRepository.save(user);
 
             SignupResponseDTO response = new SignupResponseDTO();
@@ -77,11 +96,35 @@ public class UserService {
         }
     }
 
-    public User authenticateUser(String username, String password) {
-        User user = userRepository.findByUsername(username);
-        if (user != null && passwordEncoder.matches(password, user.getPassword())) {
-            return user;
+    public User authenticateUser(SigninRequestDTO signinRequestDTO) {
+        String username = signinRequestDTO.getUsername();
+        String password = signinRequestDTO.getPassword();
+
+        Optional<User> user = userRepository.findByUsername(username);
+
+
+        if (user.isEmpty()) {
+            throw new ApiRequestException("Username tidak ditemukan");
         }
-        return null; // or throw an exception for authentication failure
+
+        if (!passwordEncoder.matches(password, user.get().getPassword())) {
+            throw new ApiRequestException("Password salah");
+        }
+
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            username,
+                            password
+                    )
+            );
+
+            return userRepository.findByUsername(username)
+                    .orElseThrow();
+        }
+        catch (Exception e)
+        {
+            throw new ApiRequestException("Terjadi kesalahan server. Silakan coba kembali", e);
+        }
     }
 }
